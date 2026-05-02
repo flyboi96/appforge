@@ -1,5 +1,8 @@
 import { httpsCallable } from 'firebase/functions'
-import { getAppForgeFunctions } from '../firebase/firebaseClient'
+import {
+  getAppForgeFunctions,
+  isAiGenerationEnabled,
+} from '../firebase/firebaseClient'
 import { normalizeAppSpec } from '../storage/appForgeStore'
 import type { AppSpec, GeneratedAppDraft } from '../types/appSpec'
 import { appSpecModelSummary } from './appSpecModelSummary'
@@ -22,9 +25,46 @@ const warningListFrom = (value: unknown) =>
         .filter(Boolean)
     : []
 
+const callableErrorMessage = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return 'AI generation failed. You can use the local mock generator instead.'
+  }
+
+  const details =
+    'customData' in error &&
+    typeof error.customData === 'object' &&
+    error.customData !== null &&
+    'serverResponse' in error.customData &&
+    typeof error.customData.serverResponse === 'object' &&
+    error.customData.serverResponse !== null &&
+    'error' in error.customData.serverResponse &&
+    typeof error.customData.serverResponse.error === 'object' &&
+    error.customData.serverResponse.error !== null &&
+    'details' in error.customData.serverResponse.error
+      ? error.customData.serverResponse.error.details
+      : undefined
+
+  if (
+    details &&
+    typeof details === 'object' &&
+    'message' in details &&
+    typeof details.message === 'string'
+  ) {
+    return `${error.message}: ${details.message}`
+  }
+
+  return error.message
+}
+
 export const generateAppSpecWithAI = async (
   prompt: string,
 ): Promise<GeneratedAppDraft> => {
+  if (!isAiGenerationEnabled()) {
+    throw new Error(
+      'AI generation is disabled by VITE_ENABLE_AI_GENERATION. Set it to true only when you intentionally want to spend OpenAI credits.',
+    )
+  }
+
   const functions = getAppForgeFunctions()
 
   if (!functions) {
@@ -38,10 +78,17 @@ export const generateAppSpecWithAI = async (
     GenerateAppSpecCallableResponse
   >(functions, 'generateAppSpec')
 
-  const result = await callable({
-    prompt,
-    existingAppSpecModelSummary: appSpecModelSummary,
-  })
+  let result
+
+  try {
+    result = await callable({
+      prompt,
+      existingAppSpecModelSummary: appSpecModelSummary,
+    })
+  } catch (error) {
+    throw new Error(callableErrorMessage(error), { cause: error })
+  }
+
   const appSpec = normalizeAppSpec(result.data.appSpec)
 
   if (!appSpec) {

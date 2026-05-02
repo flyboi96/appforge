@@ -11,9 +11,32 @@ import type {
 } from './appSpecTypes'
 
 const openAiApiKey = defineSecret('OPENAI_API_KEY')
-const maxPromptLength = 2000
-const maxModelSummaryLength = 4000
-const defaultModel = 'gpt-5.4-mini'
+const maxPromptLength = 800
+const maxModelSummaryLength = 1800
+const maxOutputTokens = 2500
+const defaultModel = 'gpt-5.4-nano'
+const oneHourMs = 60 * 60 * 1000
+const oneDayMs = 24 * oneHourMs
+const minRequestSpacingMs = 15 * 1000
+const maxRequestsPerHourPerClient = 5
+const maxRequestsPerProcessDay = 25
+
+interface RateLimitEntry {
+  count: number
+  lastRequestAt: number
+  windowStartedAt: number
+}
+
+interface RequestWithRaw {
+  rawRequest?: {
+    ip?: string
+    headers?: Record<string, string | string[] | undefined>
+  }
+}
+
+let processWindowStartedAt = Date.now()
+let processRequestCount = 0
+const clientRateLimits = new Map<string, RateLimitEntry>()
 
 const allowedOrigins = [
   'https://flyboi96.github.io',
@@ -25,6 +48,58 @@ const allowedOrigins = [
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const firstHeaderValue = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value
+
+const clientKeyFrom = (request: RequestWithRaw) => {
+  const forwardedFor = firstHeaderValue(request.rawRequest?.headers?.['x-forwarded-for'])
+  const firstForwardedIp = forwardedFor?.split(',')[0]?.trim()
+
+  return firstForwardedIp || request.rawRequest?.ip || 'unknown-client'
+}
+
+const enforceRateLimit = (clientKey: string) => {
+  const now = Date.now()
+
+  if (now - processWindowStartedAt > oneDayMs) {
+    processWindowStartedAt = now
+    processRequestCount = 0
+    clientRateLimits.clear()
+  }
+
+  if (processRequestCount >= maxRequestsPerProcessDay) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Daily test-phase AI generation limit reached for this function instance. Use the local fallback or try again tomorrow.',
+    )
+  }
+
+  const existingEntry = clientRateLimits.get(clientKey)
+  const entry =
+    existingEntry && now - existingEntry.windowStartedAt <= oneHourMs
+      ? existingEntry
+      : { count: 0, lastRequestAt: 0, windowStartedAt: now }
+
+  if (now - entry.lastRequestAt < minRequestSpacingMs) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'AI generation is rate limited during testing. Wait a few seconds before trying again.',
+    )
+  }
+
+  if (entry.count >= maxRequestsPerHourPerClient) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Hourly test-phase AI generation limit reached. Use the local fallback or try again later.',
+    )
+  }
+
+  entry.count += 1
+  entry.lastRequestAt = now
+  clientRateLimits.set(clientKey, entry)
+  processRequestCount += 1
+}
 
 const readPrompt = (data: unknown) => {
   if (!isRecord(data) || typeof data.prompt !== 'string') {
@@ -64,9 +139,27 @@ const modelWarningsFrom = (value: unknown) =>
         .slice(0, 8)
     : []
 
+const errorDetailsFrom = (error: unknown) => {
+  if (!isRecord(error)) {
+    return {
+      name: 'UnknownError',
+      message: String(error),
+    }
+  }
+
+  return {
+    name: typeof error.name === 'string' ? error.name : 'Error',
+    message: typeof error.message === 'string' ? error.message : String(error),
+    status: typeof error.status === 'number' ? error.status : undefined,
+    code: typeof error.code === 'string' ? error.code : undefined,
+    type: typeof error.type === 'string' ? error.type : undefined,
+  }
+}
+
 export const generateAppSpec = onCall<GenerateAppSpecRequest>(
   {
     cors: allowedOrigins,
+    maxInstances: 1,
     memory: '512MiB',
     region: 'us-central1',
     secrets: [openAiApiKey],
@@ -76,14 +169,19 @@ export const generateAppSpec = onCall<GenerateAppSpecRequest>(
     try {
       const prompt = readPrompt(request.data)
       const existingAppSpecModelSummary = readModelSummary(request.data)
+      const model = process.env.OPENAI_MODEL || defaultModel
+      enforceRateLimit(clientKeyFrom(request))
+
       const client = new OpenAI({ apiKey: openAiApiKey.value() })
 
       logger.info('Generating AppForge AppSpec with OpenAI.', {
+        model,
+        maxOutputTokens,
         promptLength: prompt.length,
       })
 
       const response = await client.responses.create({
-        model: process.env.OPENAI_MODEL || defaultModel,
+        model,
         input: [
           {
             role: 'system',
@@ -98,7 +196,7 @@ export const generateAppSpec = onCall<GenerateAppSpecRequest>(
             ),
           },
         ],
-        max_output_tokens: 6000,
+        max_output_tokens: maxOutputTokens,
         text: {
           format: {
             type: 'json_schema',
@@ -123,6 +221,7 @@ export const generateAppSpec = onCall<GenerateAppSpecRequest>(
 
       const sanitized = sanitizeAppSpec(parsed.appSpec)
       const warnings = [
+        `Test-phase guardrails active: ${model}, ${maxOutputTokens} max output tokens, ${maxRequestsPerHourPerClient} requests per hour per client.`,
         ...modelWarningsFrom(parsed.warnings),
         ...sanitized.warnings,
       ].slice(0, 12)
@@ -136,13 +235,14 @@ export const generateAppSpec = onCall<GenerateAppSpecRequest>(
         throw error
       }
 
-      logger.error('generateAppSpec failed.', {
-        message: error instanceof Error ? error.message : String(error),
-      })
+      const errorDetails = errorDetailsFrom(error)
+      logger.error('generateAppSpec failed.', errorDetails)
+      console.error('generateAppSpec failed.', errorDetails)
 
       throw new HttpsError(
         'internal',
         'AI app generation failed. You can retry or use the local mock fallback.',
+        errorDetails,
       )
     }
   },

@@ -28,6 +28,9 @@ export const isFirebaseConfigured = () =>
     (value) => typeof value === 'string' && value.trim() !== '',
   )
 
+export const isAiGenerationEnabled = () =>
+  import.meta.env.VITE_ENABLE_AI_GENERATION === 'true'
+
 export const getAppForgeFunctions = () => {
   if (!isFirebaseConfigured()) {
     return null
