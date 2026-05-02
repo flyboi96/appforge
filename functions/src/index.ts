@@ -1,7 +1,7 @@
 import OpenAI from 'openai'
 import { logger } from 'firebase-functions'
 import { defineSecret } from 'firebase-functions/params'
-import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import { HttpsError, onRequest } from 'firebase-functions/v2/https'
 import { appForgeGenerationJsonSchema } from './appSpecJsonSchema'
 import { buildGenerateAppSpecInput } from './generateAppSpecPrompt'
 import { sanitizeAppSpec } from './sanitizeAppSpec'
@@ -27,11 +27,9 @@ interface RateLimitEntry {
   windowStartedAt: number
 }
 
-interface RequestWithRaw {
-  rawRequest?: {
-    ip?: string
-    headers?: Record<string, string | string[] | undefined>
-  }
+interface RequestSource {
+  ip?: string
+  headers?: Record<string, string | string[] | undefined>
 }
 
 let processWindowStartedAt = Date.now()
@@ -52,11 +50,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const firstHeaderValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value
 
-const clientKeyFrom = (request: RequestWithRaw) => {
-  const forwardedFor = firstHeaderValue(request.rawRequest?.headers?.['x-forwarded-for'])
+const clientKeyFrom = (request: RequestSource) => {
+  const forwardedFor = firstHeaderValue(request.headers?.['x-forwarded-for'])
   const firstForwardedIp = forwardedFor?.split(',')[0]?.trim()
 
-  return firstForwardedIp || request.rawRequest?.ip || 'unknown-client'
+  return firstForwardedIp || request.ip || 'unknown-client'
 }
 
 const enforceRateLimit = (clientKey: string) => {
@@ -156,94 +154,180 @@ const errorDetailsFrom = (error: unknown) => {
   }
 }
 
-export const generateAppSpec = onCall<GenerateAppSpecRequest>(
+const callableDataFrom = (body: unknown) => {
+  if (!isRecord(body) || !('data' in body)) {
+    throw new HttpsError('invalid-argument', 'Callable request body must include data.')
+  }
+
+  return body.data
+}
+
+const callableErrorByCode: Record<
+  string,
+  { httpStatus: number; callableStatus: string }
+> = {
+  aborted: { httpStatus: 409, callableStatus: 'ABORTED' },
+  cancelled: { httpStatus: 499, callableStatus: 'CANCELLED' },
+  'data-loss': { httpStatus: 500, callableStatus: 'DATA_LOSS' },
+  'deadline-exceeded': {
+    httpStatus: 504,
+    callableStatus: 'DEADLINE_EXCEEDED',
+  },
+  'failed-precondition': {
+    httpStatus: 400,
+    callableStatus: 'FAILED_PRECONDITION',
+  },
+  internal: { httpStatus: 500, callableStatus: 'INTERNAL' },
+  'invalid-argument': {
+    httpStatus: 400,
+    callableStatus: 'INVALID_ARGUMENT',
+  },
+  'not-found': { httpStatus: 404, callableStatus: 'NOT_FOUND' },
+  'out-of-range': { httpStatus: 400, callableStatus: 'OUT_OF_RANGE' },
+  'permission-denied': {
+    httpStatus: 403,
+    callableStatus: 'PERMISSION_DENIED',
+  },
+  'resource-exhausted': {
+    httpStatus: 429,
+    callableStatus: 'RESOURCE_EXHAUSTED',
+  },
+  unauthenticated: { httpStatus: 401, callableStatus: 'UNAUTHENTICATED' },
+  unavailable: { httpStatus: 503, callableStatus: 'UNAVAILABLE' },
+  unimplemented: { httpStatus: 501, callableStatus: 'UNIMPLEMENTED' },
+  unknown: { httpStatus: 500, callableStatus: 'UNKNOWN' },
+}
+
+const normalizedHttpsErrorFrom = (error: unknown) => {
+  if (error instanceof HttpsError) {
+    return error
+  }
+
+  const errorDetails = errorDetailsFrom(error)
+  logger.error('generateAppSpec failed.', errorDetails)
+  console.error('generateAppSpec failed.', errorDetails)
+
+  return new HttpsError(
+    'internal',
+    'AI app generation failed. You can retry or use the local mock fallback.',
+    errorDetails,
+  )
+}
+
+const generateAppSpecResponseFrom = async (
+  data: GenerateAppSpecRequest | unknown,
+  requestSource: RequestSource,
+): Promise<GenerateAppSpecResponse> => {
+  const prompt = readPrompt(data)
+  const existingAppSpecModelSummary = readModelSummary(data)
+  const model = process.env.OPENAI_MODEL || defaultModel
+  enforceRateLimit(clientKeyFrom(requestSource))
+
+  const client = new OpenAI({ apiKey: openAiApiKey.value() })
+
+  logger.info('Generating AppForge AppSpec with OpenAI.', {
+    model,
+    maxOutputTokens,
+    promptLength: prompt.length,
+  })
+
+  const response = await client.responses.create({
+    model,
+    input: [
+      {
+        role: 'system',
+        content:
+          'You generate safe local-only AppForge AppSpec JSON. You never generate executable code.',
+      },
+      {
+        role: 'user',
+        content: buildGenerateAppSpecInput(
+          prompt,
+          existingAppSpecModelSummary,
+        ),
+      },
+    ],
+    max_output_tokens: maxOutputTokens,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'appforge_generation',
+        strict: true,
+        schema: appForgeGenerationJsonSchema,
+      },
+    },
+  })
+
+  const outputText = (response as { output_text?: string }).output_text
+
+  if (!outputText) {
+    throw new Error('OpenAI response did not include output_text.')
+  }
+
+  const parsed: unknown = JSON.parse(outputText)
+
+  if (!isRecord(parsed) || !('appSpec' in parsed)) {
+    throw new Error('OpenAI response did not include appSpec.')
+  }
+
+  const sanitized = sanitizeAppSpec(parsed.appSpec)
+  const warnings = [
+    `Test-phase guardrails active: ${model}, ${maxOutputTokens} max output tokens, ${maxRequestsPerHourPerClient} requests per hour per client.`,
+    ...modelWarningsFrom(parsed.warnings),
+    ...sanitized.warnings,
+  ].slice(0, 12)
+
+  return {
+    appSpec: sanitized.appSpec,
+    warnings,
+  }
+}
+
+export const generateAppSpec = onRequest(
   {
     cors: allowedOrigins,
+    invoker: 'public',
     maxInstances: 1,
     memory: '512MiB',
     region: 'us-central1',
     secrets: [openAiApiKey],
     timeoutSeconds: 60,
   },
-  async (request): Promise<GenerateAppSpecResponse> => {
-    try {
-      const prompt = readPrompt(request.data)
-      const existingAppSpecModelSummary = readModelSummary(request.data)
-      const model = process.env.OPENAI_MODEL || defaultModel
-      enforceRateLimit(clientKeyFrom(request))
-
-      const client = new OpenAI({ apiKey: openAiApiKey.value() })
-
-      logger.info('Generating AppForge AppSpec with OpenAI.', {
-        model,
-        maxOutputTokens,
-        promptLength: prompt.length,
-      })
-
-      const response = await client.responses.create({
-        model,
-        input: [
-          {
-            role: 'system',
-            content:
-              'You generate safe local-only AppForge AppSpec JSON. You never generate executable code.',
-          },
-          {
-            role: 'user',
-            content: buildGenerateAppSpecInput(
-              prompt,
-              existingAppSpecModelSummary,
-            ),
-          },
-        ],
-        max_output_tokens: maxOutputTokens,
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'appforge_generation',
-            strict: true,
-            schema: appForgeGenerationJsonSchema,
-          },
+  async (request, response): Promise<void> => {
+    if (request.method !== 'POST') {
+      response.set('Allow', 'POST')
+      response.status(405).json({
+        error: {
+          status: 'INVALID_ARGUMENT',
+          message: 'generateAppSpec only accepts POST callable requests.',
         },
       })
+      return
+    }
 
-      const outputText = (response as { output_text?: string }).output_text
-
-      if (!outputText) {
-        throw new Error('OpenAI response did not include output_text.')
-      }
-
-      const parsed: unknown = JSON.parse(outputText)
-
-      if (!isRecord(parsed) || !('appSpec' in parsed)) {
-        throw new Error('OpenAI response did not include appSpec.')
-      }
-
-      const sanitized = sanitizeAppSpec(parsed.appSpec)
-      const warnings = [
-        `Test-phase guardrails active: ${model}, ${maxOutputTokens} max output tokens, ${maxRequestsPerHourPerClient} requests per hour per client.`,
-        ...modelWarningsFrom(parsed.warnings),
-        ...sanitized.warnings,
-      ].slice(0, 12)
-
-      return {
-        appSpec: sanitized.appSpec,
-        warnings,
-      }
-    } catch (error) {
-      if (error instanceof HttpsError) {
-        throw error
-      }
-
-      const errorDetails = errorDetailsFrom(error)
-      logger.error('generateAppSpec failed.', errorDetails)
-      console.error('generateAppSpec failed.', errorDetails)
-
-      throw new HttpsError(
-        'internal',
-        'AI app generation failed. You can retry or use the local mock fallback.',
-        errorDetails,
+    try {
+      const result = await generateAppSpecResponseFrom(
+        callableDataFrom(request.body),
+        {
+          headers: request.headers,
+          ip: request.ip,
+        },
       )
+
+      response.status(200).json({ data: result })
+    } catch (error) {
+      const httpsError = normalizedHttpsErrorFrom(error)
+      const errorInfo =
+        callableErrorByCode[httpsError.code] ?? callableErrorByCode.internal
+      const details = (httpsError as { details?: unknown }).details
+
+      response.status(errorInfo.httpStatus).json({
+        error: {
+          details,
+          message: httpsError.message,
+          status: errorInfo.callableStatus,
+        },
+      })
     }
   },
 )

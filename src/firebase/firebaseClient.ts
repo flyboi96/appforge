@@ -31,6 +31,20 @@ export const isFirebaseConfigured = () =>
 export const isAiGenerationEnabled = () =>
   import.meta.env.VITE_ENABLE_AI_GENERATION === 'true'
 
+export const getGenerateAppSpecUrl = () => {
+  if (!isFirebaseConfigured()) {
+    return null
+  }
+
+  const region = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1'
+
+  if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
+    return `http://127.0.0.1:5001/${firebaseConfig.projectId}/${region}/generateAppSpec`
+  }
+
+  return `https://${region}-${firebaseConfig.projectId}.cloudfunctions.net/generateAppSpec`
+}
+
 export const getAppForgeFunctions = () => {
   if (!isFirebaseConfigured()) {
     return null
