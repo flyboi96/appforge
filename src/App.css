@@ -296,6 +296,37 @@
   gap: 12px;
 }
 
+.library-tools {
+  display: grid;
+  gap: 12px;
+}
+
+.library-tools h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.library-tools p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.status-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .detail-header {
   padding: 14px;
   border: 1px solid var(--border);

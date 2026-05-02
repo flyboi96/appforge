@@ -37,6 +37,11 @@ const refreshAppTimestamp = (appSpec: AppSpec): AppSpec => ({
   updatedAt: new Date().toISOString(),
 })
 
+const exportFileName = () => {
+  const date = new Date().toISOString().slice(0, 10)
+  return `appforge-library-${date}.json`
+}
+
 function App() {
   const [data, setData] = useState<AppForgeData>(() => loadAppForgeData())
   const [activeScreen, setActiveScreen] = useState<PrimaryScreen>('create')
@@ -126,6 +131,28 @@ function App() {
     setSelectedAppId(null)
     setDraft(null)
     setActiveScreen('create')
+  }
+
+  const exportLibrary = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+
+    link.href = url
+    link.download = exportFileName()
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  const importLibrary = (importedData: AppForgeData) => {
+    updateData(() => importedData)
+    setSelectedAppId(null)
+    setDraft(null)
+    setActiveScreen('library')
   }
 
   const updateSelectedRuntime = (
@@ -248,6 +275,8 @@ function App() {
         <SettingsScreen
           appCount={data.appSpecs.length}
           onResetData={resetLocalData}
+          onExportData={exportLibrary}
+          onImportData={importLibrary}
         />
       )
     }

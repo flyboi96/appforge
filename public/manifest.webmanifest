@@ -3,13 +3,13 @@
   "short_name": "AppForge",
   "description": "A local AI-style mini-app creator and library.",
   "display": "standalone",
-  "start_url": ".",
-  "scope": ".",
+  "start_url": "/appforge/",
+  "scope": "/appforge/",
   "theme_color": "#127464",
   "background_color": "#eef2f5",
   "icons": [
     {
-      "src": "app-icon.svg",
+      "src": "/appforge/app-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
