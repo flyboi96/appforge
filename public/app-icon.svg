@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">AppForge</title>
+  <rect width="512" height="512" rx="112" fill="#127464" />
+  <path d="M132 356 214 140h72l94 216h-70l-16-43h-94l-15 43h-53Zm87-96h56l-29-76-27 76Z" fill="#ffffff" />
+  <path d="M323 156h66v54h-66v47h58v53h-58v46h-63V156h63Z" fill="#d7f4e8" />
+  <circle cx="390" cy="122" r="24" fill="#ffe6a8" />
+</svg>
