@@ -16,6 +16,7 @@ export function GeneratedReviewScreen({
     (total, screen) => total + screen.blocks.length,
     0,
   )
+  const isAiGenerated = draft.source === 'ai'
 
   return (
     <section className="screen-stack">
@@ -28,7 +29,9 @@ export function GeneratedReviewScreen({
           {appSpec.icon}
         </span>
         <div>
-          <p className="eyebrow">Generated draft</p>
+          <p className="eyebrow">
+            {isAiGenerated ? 'AI generated draft' : 'Local fallback draft'}
+          </p>
           <h2>{appSpec.name}</h2>
           <p>{appSpec.description}</p>
         </div>
@@ -53,8 +56,17 @@ export function GeneratedReviewScreen({
         </div>
       </section>
 
+      {draft.warnings && draft.warnings.length > 0 ? (
+        <section className="panel generation-warning">
+          <h3>Generation warnings</h3>
+          {draft.warnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </section>
+      ) : null}
+
       <section className="panel assumption-list">
-        <h3>Mock generator assumptions</h3>
+        <h3>{isAiGenerated ? 'AI generation notes' : 'Mock generator assumptions'}</h3>
         {draft.assumptions.map((assumption) => (
           <p key={assumption}>{assumption}</p>
         ))}

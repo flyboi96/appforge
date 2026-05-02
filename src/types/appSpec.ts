@@ -227,4 +227,6 @@ export interface GeneratedAppDraft {
   prompt: string
   assumptions: string[]
   appSpec: AppSpec
+  source?: 'ai' | 'mock'
+  warnings?: string[]
 }

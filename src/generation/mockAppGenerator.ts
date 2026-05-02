@@ -1642,5 +1642,7 @@ export const generateMockAppSpec = (prompt: string): GeneratedAppDraft => {
     prompt,
     assumptions: assumptionsForAnalysis(analysis),
     appSpec,
+    source: 'mock',
+    warnings: [],
   }
 }

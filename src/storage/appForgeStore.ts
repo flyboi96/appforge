@@ -17,6 +17,19 @@ import type {
 
 const STORAGE_KEY = 'appforge:data:v2'
 
+const appCategories = new Set<AppSpec['category']>([
+  'calculator',
+  'checklist',
+  'tracker',
+  'planner',
+  'routine',
+  'reference',
+  'study',
+  'restaurant',
+  'decision',
+  'custom',
+])
+
 export const emptyRuntimeState = (): AppRuntimeState => ({
   valuesByBlockId: {},
   dataByStoreId: {},
@@ -402,7 +415,7 @@ const normalizeScreen = (value: unknown): AppScreenSpec | null => {
   }
 }
 
-const normalizeAppSpec = (value: unknown): AppSpec | null => {
+export const normalizeAppSpec = (value: unknown): AppSpec | null => {
   if (
     !isRecord(value) ||
     typeof value.id !== 'string' ||
@@ -413,6 +426,10 @@ const normalizeAppSpec = (value: unknown): AppSpec | null => {
     !Array.isArray(value.dataStores) ||
     !Array.isArray(value.screens)
   ) {
+    return null
+  }
+
+  if (!appCategories.has(value.category as AppSpec['category'])) {
     return null
   }
 

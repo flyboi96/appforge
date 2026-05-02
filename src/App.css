@@ -213,6 +213,35 @@
   gap: 14px;
 }
 
+.ai-generation-indicator {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.generation-warning {
+  display: grid;
+  gap: 10px;
+  border-color: #f0b429;
+  background: #fff8e6;
+}
+
+.generation-warning h3,
+.generation-warning p {
+  margin: 0;
+}
+
+.generation-warning h3 {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.generation-warning p {
+  color: #6f4e00;
+  font-size: 0.92rem;
+}
+
 .example-list {
   display: grid;
   gap: 8px;
@@ -393,6 +422,11 @@ button {
   border: 1px solid var(--border-strong);
   font: inherit;
   cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .primary-button,
