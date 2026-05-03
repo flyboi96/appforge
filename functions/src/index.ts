@@ -13,6 +13,7 @@ import type {
 const openAiApiKey = defineSecret('OPENAI_API_KEY')
 const maxPromptLength = 800
 const maxModelSummaryLength = 1800
+const maxCurrentAppSpecJsonLength = 12000
 const maxOutputTokens = 3200
 const defaultModel = 'gpt-5.4-nano'
 const oneHourMs = 60 * 60 * 1000
@@ -30,6 +31,26 @@ interface RateLimitEntry {
 interface RequestSource {
   ip?: string
   headers?: Record<string, string | string[] | undefined>
+}
+
+type GenerationMode = NonNullable<GenerateAppSpecRequest['mode']>
+
+interface PreserveAppMetadata {
+  createdAt: string
+  id: string
+  version: number
+}
+
+interface CurrentAppSpecContext {
+  json: string
+  preserveMetadata: PreserveAppMetadata
+}
+
+interface ModelRequestContext {
+  currentAppSpecJson?: string
+  existingAppSpecModelSummary?: string
+  mode: GenerationMode
+  prompt: string
 }
 
 let processWindowStartedAt = Date.now()
@@ -126,6 +147,69 @@ const readModelSummary = (data: unknown) => {
   }
 
   return data.existingAppSpecModelSummary.trim().slice(0, maxModelSummaryLength)
+}
+
+const readGenerationMode = (data: unknown): GenerationMode => {
+  if (!isRecord(data) || data.mode === undefined || data.mode === 'create') {
+    return 'create'
+  }
+
+  if (data.mode === 'improve') {
+    return 'improve'
+  }
+
+  throw new HttpsError('invalid-argument', 'Generation mode must be create or improve.')
+}
+
+const readCurrentAppSpecContext = (
+  data: unknown,
+  mode: GenerationMode,
+): CurrentAppSpecContext | undefined => {
+  if (mode !== 'improve') {
+    return undefined
+  }
+
+  if (!isRecord(data) || !isRecord(data.currentAppSpec)) {
+    throw new HttpsError(
+      'invalid-argument',
+      'Improvement requests must include the current AppSpec.',
+    )
+  }
+
+  const currentAppSpec = data.currentAppSpec
+
+  if (
+    typeof currentAppSpec.id !== 'string' ||
+    typeof currentAppSpec.createdAt !== 'string'
+  ) {
+    throw new HttpsError(
+      'invalid-argument',
+      'Current AppSpec must include id and createdAt.',
+    )
+  }
+
+  const version =
+    typeof currentAppSpec.version === 'number' &&
+    Number.isFinite(currentAppSpec.version)
+      ? Math.max(1, Math.floor(currentAppSpec.version))
+      : 1
+  const json = JSON.stringify(currentAppSpec, null, 2)
+
+  if (json.length > maxCurrentAppSpecJsonLength) {
+    throw new HttpsError(
+      'invalid-argument',
+      'Current AppSpec is too large to improve safely in this MVP.',
+    )
+  }
+
+  return {
+    json,
+    preserveMetadata: {
+      createdAt: currentAppSpec.createdAt,
+      id: currentAppSpec.id,
+      version,
+    },
+  }
 }
 
 const modelWarningsFrom = (value: unknown) =>
@@ -303,8 +387,7 @@ const outputTextFrom = (response: unknown) => {
 const requestModelOutput = async (
   client: OpenAI,
   model: string,
-  prompt: string,
-  existingAppSpecModelSummary: string | undefined,
+  context: ModelRequestContext,
   retryMalformedJson: boolean,
 ) => {
   const retryInstruction = retryMalformedJson
@@ -321,10 +404,7 @@ const requestModelOutput = async (
       },
       {
         role: 'user',
-        content: `${buildGenerateAppSpecInput(
-          prompt,
-          existingAppSpecModelSummary,
-        )}${retryInstruction}`,
+        content: `${buildGenerateAppSpecInput(context)}${retryInstruction}`,
       },
     ],
     max_output_tokens: maxOutputTokens,
@@ -345,14 +425,12 @@ const requestModelOutput = async (
 const parsedModelOutputFrom = async (
   client: OpenAI,
   model: string,
-  prompt: string,
-  existingAppSpecModelSummary: string | undefined,
+  context: ModelRequestContext,
 ): Promise<ParsedModelOutput> => {
   const firstOutput = await requestModelOutput(
     client,
     model,
-    prompt,
-    existingAppSpecModelSummary,
+    context,
     false,
   )
 
@@ -371,8 +449,7 @@ const parsedModelOutputFrom = async (
   const retryOutput = await requestModelOutput(
     client,
     model,
-    prompt,
-    existingAppSpecModelSummary,
+    context,
     true,
   )
   const parsedRetryOutput = parseModelOutput(retryOutput)
@@ -391,6 +468,8 @@ const generateAppSpecResponseFrom = async (
 ): Promise<GenerateAppSpecResponse> => {
   const prompt = readPrompt(data)
   const existingAppSpecModelSummary = readModelSummary(data)
+  const mode = readGenerationMode(data)
+  const currentAppSpecContext = readCurrentAppSpecContext(data, mode)
   const model = process.env.OPENAI_MODEL || defaultModel
   enforceRateLimit(clientKeyFrom(requestSource))
 
@@ -399,21 +478,28 @@ const generateAppSpecResponseFrom = async (
   logger.info('Generating AppForge AppSpec with OpenAI.', {
     model,
     maxOutputTokens,
+    mode,
     promptLength: prompt.length,
   })
 
   const parsed = await parsedModelOutputFrom(
     client,
     model,
-    prompt,
-    existingAppSpecModelSummary,
+    {
+      currentAppSpecJson: currentAppSpecContext?.json,
+      existingAppSpecModelSummary,
+      mode,
+      prompt,
+    },
   )
 
   if (!isRecord(parsed.value) || !('appSpec' in parsed.value)) {
     throw new Error('OpenAI response did not include appSpec.')
   }
 
-  const sanitized = sanitizeAppSpec(parsed.value.appSpec)
+  const sanitized = sanitizeAppSpec(parsed.value.appSpec, {
+    preserveMetadata: currentAppSpecContext?.preserveMetadata,
+  })
   const warnings = [
     `Test-phase guardrails active: ${model}, ${maxOutputTokens} max output tokens, ${maxRequestsPerHourPerClient} requests per hour per client.`,
     ...(parsed.warning ? [parsed.warning] : []),

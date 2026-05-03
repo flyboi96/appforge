@@ -541,6 +541,7 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.button-row .primary-button,
 .button-row .secondary-button {
   flex: 1;
 }

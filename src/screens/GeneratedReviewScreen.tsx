@@ -5,12 +5,22 @@ interface GeneratedReviewScreenProps {
   draft: GeneratedAppDraft
   onBack: () => void
   onSave: () => void
+  onSaveAsCopy?: () => void
+}
+
+const draftLabelFor = (isImprovement: boolean, isAiGenerated: boolean) => {
+  if (isImprovement) {
+    return isAiGenerated ? 'AI improved draft' : 'Local improved draft'
+  }
+
+  return isAiGenerated ? 'AI generated draft' : 'Local fallback draft'
 }
 
 export function GeneratedReviewScreen({
   draft,
   onBack,
   onSave,
+  onSaveAsCopy,
 }: GeneratedReviewScreenProps) {
   const appSpec = draft.appSpec
   const blockCount = appSpec.screens.reduce(
@@ -18,11 +28,13 @@ export function GeneratedReviewScreen({
     0,
   )
   const isAiGenerated = draft.source === 'ai'
+  const isImprovement = draft.mode === 'improve'
+  const draftLabel = draftLabelFor(isImprovement, isAiGenerated)
 
   return (
     <section className="screen-stack">
       <button type="button" className="back-button" onClick={onBack}>
-        Back to prompt
+        {isImprovement ? 'Back to improvement' : 'Back to prompt'}
       </button>
 
       <header className="detail-header">
@@ -30,9 +42,7 @@ export function GeneratedReviewScreen({
           {displayIconForApp(appSpec)}
         </span>
         <div>
-          <p className="eyebrow">
-            {isAiGenerated ? 'AI generated draft' : 'Local fallback draft'}
-          </p>
+          <p className="eyebrow">{draftLabel}</p>
           <h2>{appSpec.name}</h2>
           <p>{appSpec.description}</p>
         </div>
@@ -67,7 +77,9 @@ export function GeneratedReviewScreen({
       ) : null}
 
       <section className="panel assumption-list">
-        <h3>{isAiGenerated ? 'AI generation notes' : 'Mock generator assumptions'}</h3>
+        <h3>
+          {isAiGenerated ? 'AI generation notes' : 'Mock generator assumptions'}
+        </h3>
         {draft.assumptions.map((assumption) => (
           <p key={assumption}>{assumption}</p>
         ))}
@@ -85,9 +97,20 @@ export function GeneratedReviewScreen({
         ))}
       </section>
 
-      <button type="button" className="primary-button" onClick={onSave}>
-        Save to Library
-      </button>
+      <div className="button-row wrap">
+        <button type="button" className="primary-button" onClick={onSave}>
+          {isImprovement ? 'Update App' : 'Save to Library'}
+        </button>
+        {isImprovement && onSaveAsCopy ? (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onSaveAsCopy}
+          >
+            Save as Copy
+          </button>
+        ) : null}
+      </div>
     </section>
   )
 }

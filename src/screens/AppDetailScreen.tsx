@@ -11,6 +11,7 @@ interface AppDetailScreenProps {
   appSpec: AppSpec
   runtime: AppRuntimeState
   onBack: () => void
+  onImprove: () => void
   onValueChange: (blockId: string, value: RuntimeValue) => void
   onClearValues: (blockIds: string[]) => void
   onRecordAdd: (storeId: string, values: Record<string, StoredValue>) => void
@@ -21,6 +22,7 @@ export function AppDetailScreen({
   appSpec,
   runtime,
   onBack,
+  onImprove,
   onValueChange,
   onClearValues,
   onRecordAdd,
@@ -42,6 +44,14 @@ export function AppDetailScreen({
           <p>{appSpec.description}</p>
         </div>
       </header>
+
+      <button
+        type="button"
+        className="secondary-button full-width"
+        onClick={onImprove}
+      >
+        Improve App
+      </button>
 
       <ScreenRenderer
         appSpec={appSpec}

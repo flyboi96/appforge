@@ -138,6 +138,8 @@ export type AppBlock =
 export interface GenerateAppSpecRequest {
   prompt: string
   existingAppSpecModelSummary?: string
+  currentAppSpec?: AppSpec
+  mode?: 'create' | 'improve'
 }
 
 export interface GenerateAppSpecResponse {

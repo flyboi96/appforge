@@ -19,6 +19,14 @@ interface SanitizeResult {
   warnings: string[]
 }
 
+interface SanitizeOptions {
+  preserveMetadata?: {
+    createdAt: string
+    id: string
+    version: number
+  }
+}
+
 const appCategories = new Set<AppCategory>([
   'calculator',
   'checklist',
@@ -659,7 +667,10 @@ const repairReferences = (appSpec: AppSpec, warnings: string[]) => {
   return { ...appSpec, dataStores, screens }
 }
 
-export const sanitizeAppSpec = (value: unknown): SanitizeResult => {
+export const sanitizeAppSpec = (
+  value: unknown,
+  options: SanitizeOptions = {},
+): SanitizeResult => {
   const warnings: string[] = []
 
   if (!isRecord(value)) {
@@ -677,8 +688,9 @@ export const sanitizeAppSpec = (value: unknown): SanitizeResult => {
   }
 
   const now = new Date().toISOString()
+  const preservedMetadata = options.preserveMetadata
   const appSpec: AppSpec = {
-    id: randomUUID(),
+    id: preservedMetadata?.id ?? randomUUID(),
     name: text(value.name, 'Generated App'),
     description: text(
       value.description,
@@ -687,8 +699,8 @@ export const sanitizeAppSpec = (value: unknown): SanitizeResult => {
     ),
     category,
     icon: icon(value.icon, category),
-    version: 1,
-    createdAt: now,
+    version: preservedMetadata ? preservedMetadata.version + 1 : 1,
+    createdAt: preservedMetadata?.createdAt ?? now,
     updatedAt: now,
     dataStores: sanitizeDataStores(value.dataStores, warnings),
     screens: sanitizeScreens(value.screens, warnings),

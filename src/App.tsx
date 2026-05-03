@@ -4,6 +4,7 @@ import { BottomNav, type PrimaryScreen } from './components/BottomNav'
 import { AppDetailScreen } from './screens/AppDetailScreen'
 import { CreateScreen } from './screens/CreateScreen'
 import { GeneratedReviewScreen } from './screens/GeneratedReviewScreen'
+import { ImproveAppScreen } from './screens/ImproveAppScreen'
 import { LibraryScreen } from './screens/LibraryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import {
@@ -46,10 +47,14 @@ function App() {
   const [data, setData] = useState<AppForgeData>(() => loadAppForgeData())
   const [activeScreen, setActiveScreen] = useState<PrimaryScreen>('create')
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null)
+  const [improvingAppId, setImprovingAppId] = useState<string | null>(null)
   const [draft, setDraft] = useState<GeneratedAppDraft | null>(null)
 
   const selectedApp = selectedAppId
     ? data.appSpecs.find((appSpec) => appSpec.id === selectedAppId)
+    : undefined
+  const improvingApp = improvingAppId
+    ? data.appSpecs.find((appSpec) => appSpec.id === improvingAppId)
     : undefined
 
   const updateData = (updater: (currentData: AppForgeData) => AppForgeData) => {
@@ -63,6 +68,7 @@ function App() {
   const navigate = (screen: PrimaryScreen) => {
     setActiveScreen(screen)
     setSelectedAppId(null)
+    setImprovingAppId(null)
     setDraft(null)
   }
 
@@ -72,6 +78,28 @@ function App() {
     }
 
     const appSpec = draft.appSpec
+
+    if (draft.mode === 'improve' && draft.targetAppId) {
+      updateData((currentData) => ({
+        appSpecs: currentData.appSpecs.map((currentAppSpec) =>
+          currentAppSpec.id === draft.targetAppId
+            ? {
+                ...appSpec,
+                createdAt: currentAppSpec.createdAt,
+                id: currentAppSpec.id,
+                version: Math.max(appSpec.version, currentAppSpec.version + 1),
+              }
+            : currentAppSpec,
+        ),
+        runtimeByAppId: currentData.runtimeByAppId,
+      }))
+      setDraft(null)
+      setImprovingAppId(null)
+      setActiveScreen('library')
+      setSelectedAppId(draft.targetAppId)
+      return
+    }
+
     updateData((currentData) => ({
       appSpecs: [appSpec, ...currentData.appSpecs],
       runtimeByAppId: {
@@ -82,6 +110,34 @@ function App() {
     setDraft(null)
     setActiveScreen('library')
     setSelectedAppId(appSpec.id)
+  }
+
+  const saveDraftAsCopy = () => {
+    if (!draft) {
+      return
+    }
+
+    const now = new Date().toISOString()
+    const copiedApp: AppSpec = {
+      ...structuredClone(draft.appSpec),
+      id: createId(),
+      name: `${draft.appSpec.name} Copy`,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    }
+
+    updateData((currentData) => ({
+      appSpecs: [copiedApp, ...currentData.appSpecs],
+      runtimeByAppId: {
+        ...currentData.runtimeByAppId,
+        [copiedApp.id]: emptyRuntimeState(),
+      },
+    }))
+    setDraft(null)
+    setImprovingAppId(null)
+    setActiveScreen('library')
+    setSelectedAppId(copiedApp.id)
   }
 
   const deleteApp = (appId: string) => {
@@ -97,6 +153,10 @@ function App() {
 
     if (selectedAppId === appId) {
       setSelectedAppId(null)
+    }
+
+    if (improvingAppId === appId) {
+      setImprovingAppId(null)
     }
   }
 
@@ -129,6 +189,7 @@ function App() {
     resetAppForgeData()
     setData(emptyAppForgeData())
     setSelectedAppId(null)
+    setImprovingAppId(null)
     setDraft(null)
     setActiveScreen('create')
   }
@@ -151,6 +212,7 @@ function App() {
   const importLibrary = (importedData: AppForgeData) => {
     updateData(() => importedData)
     setSelectedAppId(null)
+    setImprovingAppId(null)
     setDraft(null)
     setActiveScreen('library')
   }
@@ -234,26 +296,38 @@ function App() {
   }
 
   const renderScreen = () => {
-    if (selectedApp) {
-      return (
-        <AppDetailScreen
-          appSpec={selectedApp}
-          runtime={data.runtimeByAppId[selectedApp.id] ?? emptyRuntimeState()}
-          onBack={() => setSelectedAppId(null)}
-          onValueChange={updateBlockValue}
-          onClearValues={clearBlockValues}
-          onRecordAdd={addRecord}
-          onRecordDelete={deleteRecord}
-        />
-      )
-    }
-
     if (draft) {
       return (
         <GeneratedReviewScreen
           draft={draft}
           onBack={() => setDraft(null)}
           onSave={saveDraftToLibrary}
+          onSaveAsCopy={draft.mode === 'improve' ? saveDraftAsCopy : undefined}
+        />
+      )
+    }
+
+    if (improvingApp) {
+      return (
+        <ImproveAppScreen
+          appSpec={improvingApp}
+          onBack={() => setImprovingAppId(null)}
+          onDraftGenerated={setDraft}
+        />
+      )
+    }
+
+    if (selectedApp) {
+      return (
+        <AppDetailScreen
+          appSpec={selectedApp}
+          runtime={data.runtimeByAppId[selectedApp.id] ?? emptyRuntimeState()}
+          onBack={() => setSelectedAppId(null)}
+          onImprove={() => setImprovingAppId(selectedApp.id)}
+          onValueChange={updateBlockValue}
+          onClearValues={clearBlockValues}
+          onRecordAdd={addRecord}
+          onRecordDelete={deleteRecord}
         />
       )
     }

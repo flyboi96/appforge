@@ -25,20 +25,32 @@ Allowed blocks:
 - simpleTable: storeId, columns
 `.trim()
 
-export const buildGenerateAppSpecInput = (
-  prompt: string,
-  existingAppSpecModelSummary?: string,
-) => `
-Create a useful AppForge mini-app spec from the user's idea.
+interface BuildGenerateAppSpecInputOptions {
+  currentAppSpecJson?: string
+  existingAppSpecModelSummary?: string
+  mode?: 'create' | 'improve'
+  prompt: string
+}
 
-User idea:
+export const buildGenerateAppSpecInput = ({
+  currentAppSpecJson,
+  existingAppSpecModelSummary,
+  mode = 'create',
+  prompt,
+}: BuildGenerateAppSpecInputOptions) => `
+${mode === 'improve' ? 'Improve an existing AppForge mini-app spec from the user request.' : "Create a useful AppForge mini-app spec from the user's idea."}
+
+${mode === 'improve' ? 'User improvement request:' : 'User idea:'}
 ${prompt}
+
+${currentAppSpecJson ? `Current AppSpec to improve:\n${currentAppSpecJson}\n` : ''}
 
 Current AppSpec model:
 ${existingAppSpecModelSummary?.trim() || appSpecModelSummary}
 
 Generation rules:
 - Return only JSON that matches the supplied response schema.
+- Return the full AppSpec, not a patch or diff.
 - Use only supported categories, data store types, block types, field types, and computed operations.
 - Do not generate source code, HTML, JavaScript, APIs, Firebase config, auth, payments, or network calls.
 - Make the app useful, not a shallow demo.
@@ -49,4 +61,5 @@ Generation rules:
 - Keep copy concise and mobile-friendly.
 - For unsupported requests, create the closest safe local-only AppForge mini-app.
 - Put any limitations, assumptions, or omitted unsupported features in warnings.
+${mode === 'improve' ? '- Preserve the existing app id, createdAt, screen ids, block ids, data store ids, and saved-entry field ids whenever the meaning is still the same.\n- Add new ids only for genuinely new screens, blocks, stores, fields, or options.\n- Keep existing user data compatible by avoiding unnecessary id renames or store removals.\n- Focus changes on the user improvement request and avoid redesigning unrelated parts of the app.' : ''}
 `.trim()

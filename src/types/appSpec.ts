@@ -223,10 +223,14 @@ export interface AppForgeData {
   runtimeByAppId: Record<string, AppRuntimeState>
 }
 
+export type GeneratedAppMode = 'create' | 'improve'
+
 export interface GeneratedAppDraft {
   prompt: string
   assumptions: string[]
   appSpec: AppSpec
+  mode?: GeneratedAppMode
   source?: 'ai' | 'mock'
+  targetAppId?: string
   warnings?: string[]
 }
