@@ -1,4 +1,5 @@
 import type { GeneratedAppDraft } from '../types/appSpec'
+import { displayIconForApp } from '../utils/appIcon'
 
 interface GeneratedReviewScreenProps {
   draft: GeneratedAppDraft
@@ -26,7 +27,7 @@ export function GeneratedReviewScreen({
 
       <header className="detail-header">
         <span className="detail-icon" aria-hidden="true">
-          {appSpec.icon}
+          {displayIconForApp(appSpec)}
         </span>
         <div>
           <p className="eyebrow">

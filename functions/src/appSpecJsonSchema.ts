@@ -326,7 +326,11 @@ const appSpecSchema: JsonSchema = {
         'custom',
       ],
     },
-    icon: { type: 'string' },
+    icon: {
+      type: 'string',
+      maxLength: 8,
+      description: 'A single emoji icon, never a word or phrase.',
+    },
     version: { type: 'integer' },
     createdAt: { type: 'string' },
     updatedAt: { type: 'string' },

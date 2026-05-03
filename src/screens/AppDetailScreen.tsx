@@ -5,6 +5,7 @@ import type {
   RuntimeValue,
   StoredValue,
 } from '../types/appSpec'
+import { displayIconForApp } from '../utils/appIcon'
 
 interface AppDetailScreenProps {
   appSpec: AppSpec
@@ -33,7 +34,7 @@ export function AppDetailScreen({
 
       <header className="detail-header">
         <span className="detail-icon" aria-hidden="true">
-          {appSpec.icon}
+          {displayIconForApp(appSpec)}
         </span>
         <div>
           <p className="eyebrow">{appSpec.category}</p>

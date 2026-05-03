@@ -179,9 +179,12 @@
 .detail-icon {
   display: grid;
   place-items: center;
+  overflow: hidden;
   border-radius: 8px;
   background: var(--warm-soft);
   line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .template-icon {
@@ -323,6 +326,18 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
+}
+
+.library-card-main > div,
+.detail-header > div {
+  min-width: 0;
+}
+
+.library-card h3,
+.library-card p,
+.detail-header h2,
+.detail-header p:not(.eyebrow) {
+  overflow-wrap: anywhere;
 }
 
 .library-tools {

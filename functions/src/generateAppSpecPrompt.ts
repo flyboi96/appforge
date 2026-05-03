@@ -44,6 +44,7 @@ Generation rules:
 - Make the app useful, not a shallow demo.
 - Prefer 2 to 4 screens with practical names such as Overview, Capture, Log, History, Review, Settings, or Notes.
 - Use dataStores when savedEntryList or simpleTable blocks need persistent records.
+- Use a single emoji for icon. Never use an icon word like clipboard, checklist, or calculator.
 - Make block ids stable, lowercase, and unique.
 - Keep copy concise and mobile-friendly.
 - For unsupported requests, create the closest safe local-only AppForge mini-app.

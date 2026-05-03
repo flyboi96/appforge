@@ -50,6 +50,21 @@ const maxFields = 10
 const maxStringLength = 280
 const maxLongStringLength = 900
 
+const fallbackIconsByCategory: Record<AppCategory, string> = {
+  calculator: '🧮',
+  checklist: '✅',
+  tracker: '📓',
+  planner: '🗓',
+  routine: '🔁',
+  reference: '📚',
+  study: '🧠',
+  restaurant: '🍽',
+  decision: '🧭',
+  custom: '✨',
+}
+
+const emojiPattern = /\p{Extended_Pictographic}/u
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -78,6 +93,20 @@ const optionalText = (value: unknown, maxLength = maxStringLength) => {
 
   const nextValue = truncate(value, maxLength)
   return nextValue || undefined
+}
+
+const icon = (value: unknown, category: AppCategory) => {
+  if (typeof value !== 'string') {
+    return fallbackIconsByCategory[category]
+  }
+
+  for (const character of Array.from(value.trim())) {
+    if (emojiPattern.test(character)) {
+      return character
+    }
+  }
+
+  return fallbackIconsByCategory[category]
 }
 
 const slugify = (value: string, fallback: string) =>
@@ -657,7 +686,7 @@ export const sanitizeAppSpec = (value: unknown): SanitizeResult => {
       maxLongStringLength,
     ),
     category,
-    icon: text(value.icon, '✨', 8),
+    icon: icon(value.icon, category),
     version: 1,
     createdAt: now,
     updatedAt: now,

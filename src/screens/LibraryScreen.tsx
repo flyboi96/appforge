@@ -1,5 +1,6 @@
 import { EmptyState } from '../components/EmptyState'
 import type { AppSpec } from '../types/appSpec'
+import { displayIconForApp } from '../utils/appIcon'
 
 interface LibraryScreenProps {
   appSpecs: AppSpec[]
@@ -46,7 +47,7 @@ export function LibraryScreen({
           <article key={appSpec.id} className="library-card">
             <div className="library-card-main">
               <span className="app-icon" aria-hidden="true">
-                {appSpec.icon}
+                {displayIconForApp(appSpec)}
               </span>
               <div>
                 <h3>{appSpec.name}</h3>

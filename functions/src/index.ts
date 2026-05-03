@@ -13,7 +13,7 @@ import type {
 const openAiApiKey = defineSecret('OPENAI_API_KEY')
 const maxPromptLength = 800
 const maxModelSummaryLength = 1800
-const maxOutputTokens = 2500
+const maxOutputTokens = 3200
 const defaultModel = 'gpt-5.4-nano'
 const oneHourMs = 60 * 60 * 1000
 const oneDayMs = 24 * oneHourMs
@@ -154,6 +154,9 @@ const errorDetailsFrom = (error: unknown) => {
   }
 }
 
+const messageFromError = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
 const callableDataFrom = (body: unknown) => {
   if (!isRecord(body) || !('data' in body)) {
     throw new HttpsError('invalid-argument', 'Callable request body must include data.')
@@ -214,6 +217,174 @@ const normalizedHttpsErrorFrom = (error: unknown) => {
   )
 }
 
+interface ParsedModelOutput {
+  value: unknown
+  warning?: string
+}
+
+const fencedJsonPattern = /^```(?:json)?\s*([\s\S]*?)\s*```$/i
+
+const stripCodeFence = (value: string) => {
+  const match = value.trim().match(fencedJsonPattern)
+  return match?.[1]?.trim() ?? value.trim()
+}
+
+const extractJsonObject = (value: string) => {
+  const start = value.indexOf('{')
+  const end = value.lastIndexOf('}')
+
+  if (start === -1 || end === -1 || end <= start) {
+    return value
+  }
+
+  return value.slice(start, end + 1)
+}
+
+const withoutTrailingCommas = (value: string) =>
+  value.replace(/,\s*(?=[}\]])/g, '')
+
+const parseModelOutput = (outputText: string): ParsedModelOutput => {
+  const trimmed = outputText.trim()
+  const fenced = stripCodeFence(trimmed)
+  const extracted = extractJsonObject(fenced)
+  const candidates = [
+    { label: 'raw', value: trimmed },
+    { label: 'fenced', value: fenced },
+    { label: 'extracted', value: extracted },
+    {
+      label: 'trailing-comma-cleaned',
+      value: withoutTrailingCommas(extracted),
+    },
+  ]
+
+  let lastParseError = 'Unknown JSON parse error.'
+  const seenCandidates = new Set<string>()
+
+  for (const candidate of candidates) {
+    if (!candidate.value || seenCandidates.has(candidate.value)) {
+      continue
+    }
+
+    seenCandidates.add(candidate.value)
+
+    try {
+      return {
+        value: JSON.parse(candidate.value),
+        warning:
+          candidate.label === 'raw'
+            ? undefined
+            : 'Cleaned minor JSON formatting from the AI response before saving.',
+      }
+    } catch (error) {
+      lastParseError = messageFromError(error)
+    }
+  }
+
+  throw new HttpsError(
+    'internal',
+    'AI returned malformed JSON. AppForge retried safely; use the local fallback or try again.',
+    {
+      reason: 'malformed_json',
+      parseError: lastParseError,
+    },
+  )
+}
+
+const outputTextFrom = (response: unknown) => {
+  const outputText = (response as { output_text?: string }).output_text
+
+  if (!outputText) {
+    throw new Error('OpenAI response did not include output_text.')
+  }
+
+  return outputText
+}
+
+const requestModelOutput = async (
+  client: OpenAI,
+  model: string,
+  prompt: string,
+  existingAppSpecModelSummary: string | undefined,
+  retryMalformedJson: boolean,
+) => {
+  const retryInstruction = retryMalformedJson
+    ? '\n\nThe previous output was malformed JSON. Return only valid JSON with double-quoted property names, no comments, no markdown, and no trailing commas.'
+    : ''
+
+  const response = await client.responses.create({
+    model,
+    input: [
+      {
+        role: 'system',
+        content:
+          'You generate safe local-only AppForge AppSpec JSON. You never generate executable code.',
+      },
+      {
+        role: 'user',
+        content: `${buildGenerateAppSpecInput(
+          prompt,
+          existingAppSpecModelSummary,
+        )}${retryInstruction}`,
+      },
+    ],
+    max_output_tokens: maxOutputTokens,
+    temperature: 0.2,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'appforge_generation',
+        strict: true,
+        schema: appForgeGenerationJsonSchema,
+      },
+    },
+  })
+
+  return outputTextFrom(response)
+}
+
+const parsedModelOutputFrom = async (
+  client: OpenAI,
+  model: string,
+  prompt: string,
+  existingAppSpecModelSummary: string | undefined,
+): Promise<ParsedModelOutput> => {
+  const firstOutput = await requestModelOutput(
+    client,
+    model,
+    prompt,
+    existingAppSpecModelSummary,
+    false,
+  )
+
+  try {
+    return parseModelOutput(firstOutput)
+  } catch (error) {
+    if (!(error instanceof HttpsError)) {
+      throw error
+    }
+
+    logger.warn('OpenAI returned malformed JSON; retrying once.', {
+      message: error.message,
+    })
+  }
+
+  const retryOutput = await requestModelOutput(
+    client,
+    model,
+    prompt,
+    existingAppSpecModelSummary,
+    true,
+  )
+  const parsedRetryOutput = parseModelOutput(retryOutput)
+
+  return {
+    value: parsedRetryOutput.value,
+    warning:
+      parsedRetryOutput.warning ??
+      'Retried AI generation because the first response was malformed JSON.',
+  }
+}
+
 const generateAppSpecResponseFrom = async (
   data: GenerateAppSpecRequest | unknown,
   requestSource: RequestSource,
@@ -231,49 +402,22 @@ const generateAppSpecResponseFrom = async (
     promptLength: prompt.length,
   })
 
-  const response = await client.responses.create({
+  const parsed = await parsedModelOutputFrom(
+    client,
     model,
-    input: [
-      {
-        role: 'system',
-        content:
-          'You generate safe local-only AppForge AppSpec JSON. You never generate executable code.',
-      },
-      {
-        role: 'user',
-        content: buildGenerateAppSpecInput(
-          prompt,
-          existingAppSpecModelSummary,
-        ),
-      },
-    ],
-    max_output_tokens: maxOutputTokens,
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'appforge_generation',
-        strict: true,
-        schema: appForgeGenerationJsonSchema,
-      },
-    },
-  })
+    prompt,
+    existingAppSpecModelSummary,
+  )
 
-  const outputText = (response as { output_text?: string }).output_text
-
-  if (!outputText) {
-    throw new Error('OpenAI response did not include output_text.')
-  }
-
-  const parsed: unknown = JSON.parse(outputText)
-
-  if (!isRecord(parsed) || !('appSpec' in parsed)) {
+  if (!isRecord(parsed.value) || !('appSpec' in parsed.value)) {
     throw new Error('OpenAI response did not include appSpec.')
   }
 
-  const sanitized = sanitizeAppSpec(parsed.appSpec)
+  const sanitized = sanitizeAppSpec(parsed.value.appSpec)
   const warnings = [
     `Test-phase guardrails active: ${model}, ${maxOutputTokens} max output tokens, ${maxRequestsPerHourPerClient} requests per hour per client.`,
-    ...modelWarningsFrom(parsed.warnings),
+    ...(parsed.warning ? [parsed.warning] : []),
+    ...modelWarningsFrom(parsed.value.warnings),
     ...sanitized.warnings,
   ].slice(0, 12)
 
