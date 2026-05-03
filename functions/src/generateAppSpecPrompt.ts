@@ -17,7 +17,7 @@ Allowed blocks:
 - select: label, options, defaultValue
 - checkbox: text, defaultValue
 - checkboxList: label, items
-- button: text, action clearValues or setValue
+- button: text, action clearValues or setValue. Do not use button for unsupported app-specific actions.
 - computedValue: operation add/subtract/multiply/divide/concat/countChecked/randomChoice/pace
 - savedEntryList: storeId, fields, submitLabel, emptyText
 - listEditor: placeholder, addLabel, defaultItems
@@ -57,6 +57,8 @@ Generation rules:
 - Prefer 2 to 4 screens with practical names such as Overview, Capture, Log, History, Review, Settings, or Notes.
 - Use dataStores when savedEntryList or simpleTable blocks need persistent records.
 - Use a single emoji for icon. Never use an icon word like clipboard, checklist, or calculator.
+- Only include button blocks when the action is clearValues or setValue and the click visibly changes supported runtime data.
+- Do not create buttons labeled Generate, Build, Analyze, Recommend, Sync, Submit, Save, or Plan unless they use a supported button action. Use savedEntryList, listEditor, randomizer, computedValue, checkboxList, or simpleTable instead.
 - Make block ids stable, lowercase, and unique.
 - Keep copy concise and mobile-friendly.
 - For unsupported requests, create the closest safe local-only AppForge mini-app.

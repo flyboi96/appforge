@@ -6,13 +6,24 @@ interface ButtonBlockViewProps {
 }
 
 export function ButtonBlockView({ block, onAction }: ButtonBlockViewProps) {
+  const hasAction = Boolean(block.action)
+
   return (
-    <button
-      type="button"
-      className="secondary-button full-width"
-      onClick={() => onAction(block)}
-    >
-      {block.text}
-    </button>
+    <section className="button-block">
+      <button
+        type="button"
+        className="secondary-button full-width"
+        disabled={!hasAction}
+        onClick={() => onAction(block)}
+      >
+        {block.text}
+      </button>
+      {!hasAction ? (
+        <p className="muted-text">
+          This generated button is not configured yet. Improve this app to
+          replace it with a supported control.
+        </p>
+      ) : null}
+    </section>
   )
 }

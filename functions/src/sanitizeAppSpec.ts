@@ -423,13 +423,21 @@ const sanitizeBlock = (
 
       return { ...base, type: 'checkboxList', items }
     }
-    case 'button':
+    case 'button': {
+      const action = sanitizeButtonAction(value.action)
+
+      if (!action) {
+        warnings.push('Dropped a button without a supported action.')
+        return null
+      }
+
       return {
         ...base,
         type: 'button',
         text: text(value.text, 'Run'),
-        action: sanitizeButtonAction(value.action),
+        action,
       }
+    }
     case 'computedValue': {
       const operation = sanitizeComputedOperation(value.operation)
 

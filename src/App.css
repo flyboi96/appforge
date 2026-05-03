@@ -440,7 +440,7 @@ button {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.72;
 }
 
@@ -544,6 +544,11 @@ button:disabled {
 .button-row .primary-button,
 .button-row .secondary-button {
   flex: 1;
+}
+
+.button-block {
+  display: grid;
+  gap: 8px;
 }
 
 .full-width {
