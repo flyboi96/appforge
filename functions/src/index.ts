@@ -13,7 +13,7 @@ import type {
 const openAiApiKey = defineSecret('OPENAI_API_KEY')
 const maxPromptLength = 800
 const maxModelSummaryLength = 1800
-const maxCurrentAppSpecJsonLength = 12000
+const maxCurrentAppSpecJsonLength = 24000
 const maxOutputTokens = 3200
 const defaultModel = 'gpt-5.4-nano'
 const oneHourMs = 60 * 60 * 1000
@@ -44,6 +44,7 @@ interface PreserveAppMetadata {
 interface CurrentAppSpecContext {
   json: string
   preserveMetadata: PreserveAppMetadata
+  warning?: string
 }
 
 interface ModelRequestContext {
@@ -161,6 +162,224 @@ const readGenerationMode = (data: unknown): GenerationMode => {
   throw new HttpsError('invalid-argument', 'Generation mode must be create or improve.')
 }
 
+const shortText = (value: unknown, maxLength = 180) => {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+
+  if (trimmed.length <= maxLength) {
+    return trimmed
+  }
+
+  return `${trimmed.slice(0, maxLength).trim()}...`
+}
+
+const shortStringArray = (value: unknown, maxItems = 24) =>
+  Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => shortText(item, 80))
+        .filter((item): item is string => Boolean(item))
+        .slice(0, maxItems)
+    : undefined
+
+const shortOptions = (value: unknown, maxItems = 16) =>
+  Array.isArray(value)
+    ? value
+        .filter(isRecord)
+        .map((option) => ({
+          id: shortText(option.id, 80),
+          label: shortText(option.label, 80),
+          value: shortText(option.value, 80),
+        }))
+        .slice(0, maxItems)
+    : undefined
+
+const shortFields = (value: unknown, maxItems = 12) =>
+  Array.isArray(value)
+    ? value
+        .filter(isRecord)
+        .map((field) => ({
+          id: shortText(field.id, 80),
+          inputType: shortText(field.inputType, 32),
+          label: shortText(field.label, 100),
+          options: shortOptions(field.options, 12),
+          placeholder: shortText(field.placeholder, 100),
+        }))
+        .slice(0, maxItems)
+    : undefined
+
+const compactBlockForModel = (block: unknown) => {
+  if (!isRecord(block)) {
+    return block
+  }
+
+  const compactBlock: Record<string, unknown> = {
+    id: shortText(block.id, 80),
+    type: shortText(block.type, 40),
+    label: shortText(block.label, 100),
+    helpText: shortText(block.helpText, 180),
+  }
+
+  switch (block.type) {
+    case 'heading':
+      compactBlock.text = shortText(block.text, 140)
+      compactBlock.level = block.level
+      break
+    case 'paragraph':
+      compactBlock.text = shortText(block.text, 260)
+      break
+    case 'textInput':
+    case 'numberInput':
+    case 'textarea':
+      compactBlock.placeholder = shortText(block.placeholder, 120)
+      compactBlock.defaultValue = block.defaultValue
+      compactBlock.unit = shortText(block.unit, 40)
+      break
+    case 'select':
+      compactBlock.options = shortOptions(block.options)
+      compactBlock.defaultValue = shortText(block.defaultValue, 80)
+      break
+    case 'checkbox':
+      compactBlock.text = shortText(block.text, 140)
+      compactBlock.defaultValue = block.defaultValue
+      break
+    case 'checkboxList':
+      compactBlock.items = Array.isArray(block.items)
+        ? block.items
+            .filter(isRecord)
+            .map((item) => ({
+              id: shortText(item.id, 80),
+              label: shortText(item.label, 100),
+            }))
+            .slice(0, 28)
+        : undefined
+      break
+    case 'button':
+      compactBlock.text = shortText(block.text, 100)
+      compactBlock.action = block.action
+      break
+    case 'computedValue':
+      compactBlock.operation = block.operation
+      compactBlock.precision = block.precision
+      compactBlock.resultLabel = shortText(block.resultLabel, 100)
+      break
+    case 'savedEntryList':
+      compactBlock.storeId = shortText(block.storeId, 80)
+      compactBlock.fields = shortFields(block.fields)
+      compactBlock.submitLabel = shortText(block.submitLabel, 100)
+      compactBlock.emptyText = shortText(block.emptyText, 140)
+      break
+    case 'listEditor':
+      compactBlock.placeholder = shortText(block.placeholder, 120)
+      compactBlock.addLabel = shortText(block.addLabel, 80)
+      compactBlock.defaultItems = shortStringArray(block.defaultItems)
+      break
+    case 'randomizer':
+      compactBlock.sourceBlockIds = shortStringArray(block.sourceBlockIds)
+      compactBlock.buttonLabel = shortText(block.buttonLabel, 100)
+      compactBlock.resultLabel = shortText(block.resultLabel, 100)
+      break
+    case 'simpleTable':
+      compactBlock.storeId = shortText(block.storeId, 80)
+      compactBlock.columns = Array.isArray(block.columns)
+        ? block.columns
+            .filter(isRecord)
+            .map((column) => ({
+              fieldId: shortText(column.fieldId, 80),
+              label: shortText(column.label, 100),
+            }))
+            .slice(0, 12)
+        : undefined
+      compactBlock.emptyText = shortText(block.emptyText, 140)
+      break
+  }
+
+  return Object.fromEntries(
+    Object.entries(compactBlock).filter(([, value]) => value !== undefined),
+  )
+}
+
+const compactAppSpecForModel = (appSpec: Record<string, unknown>) => ({
+  category: appSpec.category,
+  createdAt: appSpec.createdAt,
+  dataStores: Array.isArray(appSpec.dataStores)
+    ? appSpec.dataStores.filter(isRecord).map((store) => ({
+        id: shortText(store.id, 80),
+        name: shortText(store.name, 100),
+        type: store.type,
+      }))
+    : [],
+  description: shortText(appSpec.description, 260),
+  icon: appSpec.icon,
+  id: appSpec.id,
+  name: shortText(appSpec.name, 120),
+  screens: Array.isArray(appSpec.screens)
+    ? appSpec.screens.filter(isRecord).map((screen) => ({
+        blocks: Array.isArray(screen.blocks)
+          ? screen.blocks.map(compactBlockForModel)
+          : [],
+        description: shortText(screen.description, 180),
+        id: shortText(screen.id, 80),
+        title: shortText(screen.title, 100),
+      }))
+    : [],
+  updatedAt: appSpec.updatedAt,
+  version: appSpec.version,
+})
+
+const outlineAppSpecForModel = (appSpec: Record<string, unknown>) => ({
+  category: appSpec.category,
+  createdAt: appSpec.createdAt,
+  dataStores: Array.isArray(appSpec.dataStores)
+    ? appSpec.dataStores.filter(isRecord).map((store) => ({
+        id: shortText(store.id, 80),
+        name: shortText(store.name, 100),
+        type: store.type,
+      }))
+    : [],
+  description: shortText(appSpec.description, 180),
+  id: appSpec.id,
+  name: shortText(appSpec.name, 120),
+  screens: Array.isArray(appSpec.screens)
+    ? appSpec.screens.filter(isRecord).map((screen) => ({
+        blockOutline: Array.isArray(screen.blocks)
+          ? screen.blocks.filter(isRecord).map((block) => ({
+              id: shortText(block.id, 80),
+              label: shortText(block.label, 80),
+              storeId: shortText(block.storeId, 80),
+              type: shortText(block.type, 40),
+            }))
+          : [],
+        id: shortText(screen.id, 80),
+        title: shortText(screen.title, 100),
+      }))
+    : [],
+  version: appSpec.version,
+})
+
+const currentAppSpecJsonForModel = (currentAppSpec: Record<string, unknown>) => {
+  const compactJson = JSON.stringify(compactAppSpecForModel(currentAppSpec))
+
+  if (compactJson.length <= maxCurrentAppSpecJsonLength) {
+    return {
+      json: compactJson,
+      warning:
+        JSON.stringify(currentAppSpec).length > maxCurrentAppSpecJsonLength
+          ? 'Large current AppSpec was compacted before improvement to stay within test-phase AI limits.'
+          : undefined,
+    }
+  }
+
+  return {
+    json: JSON.stringify(outlineAppSpecForModel(currentAppSpec)),
+    warning:
+      'Very large current AppSpec was summarized as an outline before improvement to stay within test-phase AI limits.',
+  }
+}
+
 const readCurrentAppSpecContext = (
   data: unknown,
   mode: GenerationMode,
@@ -193,12 +412,12 @@ const readCurrentAppSpecContext = (
     Number.isFinite(currentAppSpec.version)
       ? Math.max(1, Math.floor(currentAppSpec.version))
       : 1
-  const json = JSON.stringify(currentAppSpec, null, 2)
+  const { json, warning } = currentAppSpecJsonForModel(currentAppSpec)
 
   if (json.length > maxCurrentAppSpecJsonLength) {
     throw new HttpsError(
       'invalid-argument',
-      'Current AppSpec is too large to improve safely in this MVP.',
+      'Current AppSpec is too large to improve safely even after summarizing it.',
     )
   }
 
@@ -209,6 +428,7 @@ const readCurrentAppSpecContext = (
       id: currentAppSpec.id,
       version,
     },
+    warning,
   }
 }
 
@@ -502,6 +722,7 @@ const generateAppSpecResponseFrom = async (
   })
   const warnings = [
     `Test-phase guardrails active: ${model}, ${maxOutputTokens} max output tokens, ${maxRequestsPerHourPerClient} requests per hour per client.`,
+    ...(currentAppSpecContext?.warning ? [currentAppSpecContext.warning] : []),
     ...(parsed.warning ? [parsed.warning] : []),
     ...modelWarningsFrom(parsed.value.warnings),
     ...sanitized.warnings,
